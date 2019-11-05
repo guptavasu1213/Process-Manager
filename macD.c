@@ -1,7 +1,7 @@
 /*-----------------------------------------------------------------
  * Name: Vasu Gupta
  * Student ID: 3066521
- * Assignment 1
+ * Assignment 2
  * CMPT 360
  *----------------------------------------------------------------
  */
@@ -11,14 +11,26 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <errno.h>
 
-#define INTERVAL 5 // Used for checking processes after INTERVAL seconds
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
 
+
+#define INTERVAL 1 // Used for checking processes after INTERVAL seconds
+
+int peakUsage;
 clock_t start; // Declaring the start timer for the program
 
 // Struct of process information
 typedef struct {
 	int pid; // Stores the process id
+	int start; // Records the time when the process started
+	int maxTime; // max time for the process to run
+	int killedBit; // 1 - process is killed due to exceeding time; 0- opposite of 1  
+	int memUsage; // Stores memory usage of the process
 } processInfo;
 
 processInfo *processList; // Pointer to the information of the first process
@@ -50,7 +62,7 @@ void errorCheck2(char **arg)
 	}
 }
 
-/*
+/* ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^PARAMETER ADDED
  * PURPOSE:
  *		- Function breaks the given command into words (seperated
  *		  by spaces) till the EOL.
@@ -66,19 +78,23 @@ void errorCheck2(char **arg)
  *		  word in the command at each index).
  *	  The last index stores NULL.
  */
-char **words(char *command, char **null_pos, int *countArguments)
+char **words(char *command, char **null_pos, int *countArguments, int **timer)
 {
 	// Saves the address of null terminator
 	*null_pos = strchr(command, '\0');
 	*countArguments = 0; // Initializing the count to zero
 
 	char **args = malloc(sizeof(char *));
-
+	int flagNum = 0;
 	errorCheck2(args); // checks if the pointer is NULL
 
 	char *ptr = strtok(command, " "); // extract words from strings
 
 	while (ptr != NULL) {
+		if (flagNum == 1){ // When the timer value is in ptr
+			**timer = atoi(ptr);
+			break;
+		}
 		// Reallocating for char * for more arguments
 		args = realloc(args, sizeof(char *)*(*countArguments+2));
 		errorCheck2(args);
@@ -87,9 +103,16 @@ char **words(char *command, char **null_pos, int *countArguments)
 		args[*countArguments] =
 				malloc(sizeof(char) * (strlen(ptr) + 1));
 		errorCheck1(args[*countArguments]);
-
-		// Copying the argument including the null terminator
-		strncpy(args[*countArguments], ptr, strlen(ptr)+1);
+		// When the last index in a string is a comma
+		if (strcmp(&ptr[strlen(ptr)-1], ",") == 0){
+			// POTENTIAL OF MEMORY LEAK, BECAUSE WE ALLOCATE HTE SPACE, BUT NULL IS ADDED BEFORE ONE BYTE
+			strncpy(args[*countArguments], ptr, strlen(ptr)-1);
+			args[*countArguments][strlen(ptr)-1]='\0';
+			flagNum = 1; // denotes the timer count is up next
+		}
+		else
+			// Copying the argument including the null terminator
+			strncpy(args[*countArguments], ptr, strlen(ptr)+1);			
 
 		++(*countArguments); // Incrementing
 
@@ -118,7 +141,7 @@ void freeArgs(char **args, int countArguments)
 	free(args); // Freeing the array pointer "args"
 }
 
-/*
+/*^^^^^^^^^^^^^^^^^^^^- changed parameters
  * PURPOSE:
  *	- Creates a child process
  *	- Runs the command by passing 'myargs' to execvp() in the child process
@@ -131,36 +154,61 @@ void freeArgs(char **args, int countArguments)
  *	  processList
  * RETURN: N/A
  */
-void executeProcess(char **myargs, int countCommands)
+void executeProcess(char **myargs, int countCommands, char *shared_memory, char *fileName)
 {
 	if (countCommands == 0)
 		processList = malloc(sizeof(processInfo));
 	else
 		processList = realloc(processList,
 					 sizeof(processInfo)*(countCommands+1));
-
 	if (processList == NULL) {
 		printf("\nError: Memory not allocated.\n");
 		exit(1);
 	}
 
-	int rc = fork();
+	sprintf(shared_memory, "Successful");
 
-	int status; // for passing to waitpid()
+	//############## RESET THE FILE/ WRITE/CREATE NEW/OVERRIDE PREVIOUS
+
+	int rc = fork();
 
 	if (rc < 0) { // fork failed; exit
 		fprintf(stderr, "fork failed\n");
 		exit(1);
 	} else if (rc == 0) { // Child process
 		// To avoid displaying the contents when commands are run
-		fclose(stdout);
+		fflush(stdout);
+		// #######IF STATEMENT TO ADD THE FILE or NOT
+		// close(stdout);
+		freopen ("logfile.txt", "a+", stdout);
+		// close(1);
+		// open("foo.txt", O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
+		// dup(filefd);
+		// freopen("output.txt", "a+", stdout); 
+		// dup(filefd);
+		// if (fileName != NULL) {
+			// char file[strlen(fileName)+3];
+			// sprintf(file, "./%s",fileName);
+		// int fd = open(fileName, O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);	
+		// write(fd, stdout, 10);	
+			// open(fileName, "w");
+		// }
 		// To avoid displaying an error if an argument is invalid
 		fclose(stderr);
-		execvp(myargs[0], myargs);  // runs /bin/ls
+		execvp(myargs[0], myargs);  
+		fprintf(stdout, "HELLO\n"); // ######change to versatile code
+		if (errno == EACCES) {
+			sprintf(shared_memory, ", Permission Denied");
+		}
+		else if (errno == ENOENT) {
+			sprintf(shared_memory, ", No such file or directory");
+		}
+		else
+			sprintf(shared_memory, "Failed");
 		exit(0); // Runs when execvp() does not run successfully
 
 	} else { // parent process
-		waitpid(rc, &status, WNOHANG);
+		// waitpid(rc, &status, WNOHANG);
 		processList[countCommands].pid = rc;
 		// processList[countCommands].num = return_val;
 	}
@@ -206,10 +254,44 @@ static void handleTermination(int arg)
 	}
 	// Free memory before Termination
 	free(processList);
-	printf("Exiting (total time: %ld seconds)\n",
-				(clock()-start)/CLOCKS_PER_SEC);
+	printf("Exiting (total time: %ld seconds, peak memory usage: %dMB)\n",
+				(clock()-start)/CLOCKS_PER_SEC, peakUsage);
 
 	exit(0); // 0 means success
+}
+
+int programMemory(int pid) {
+
+	char procPath[100]; // ################
+	int sz = 10; // ##############
+	sprintf(procPath, "/proc/%d/statm", pid);
+	
+    FILE *fp = fopen(procPath, "r");
+    if (fp == NULL)
+    {
+        // printf( "File does not exist\n" ) ;
+        return -1; 
+    }
+
+	// Allocating memory based on the size of the file
+	char *fileContents = malloc(sz*(sizeof(char)) + 1); // +1 for the '\0'
+
+	fread(fileContents, 1, sz, fp); // Reading in the file
+	fclose(fp); // Closing the file
+
+	// printf("PATH: %s\n", procPath);
+	// printf("SIZE: %d\n", sz);
+
+	fileContents[strchr(fileContents, ' ')-fileContents] = '\0'; // adding null after the first value
+	int processMem = atoi(fileContents);
+	if (processMem == 0) // When a process is created and its in zombie state, all the values in the file are zeros
+		return -1; 
+	// 1 Page is 4 KB############## 
+	processMem = processMem*4*0.001;
+
+	free(fileContents);
+	// printf("PATHH: %s\n", procPath);
+	return processMem;
 }
 
 /*
@@ -233,21 +315,47 @@ static void fiveSecondCheck(int arg)
 	// Format: Oct 1, 2019 12:12:00 PM
 	printf("\nNormal Report, %s\n", time_string);
 
-	int i, status, numberOfNotWorkingProcesses = 0;
-
+	int i, status, return_val, numberOfNotWorkingProcesses = 0;
+	int tempPeakUsage = 0;
 	for (i = 0; i < *totalProcesses; i++) {
-		// waitpid() returns 0 when the process is running
-		if (waitpid(processList[i].pid, &status, WNOHANG) == 0)
-			printf("[%d] Running\n", i);
+		// waitpid() returns 0 when the process is rusnning
+		// Don't even need WAIT PID I GUESSSS####################
+		// Check with the interrupt sent mannualy after few seconds and stuff#########
+		return_val = waitpid(processList[i].pid, &status, WNOHANG);
+
+		if (return_val == 0){
+			// If timer exceeds, kill the process
+			if (time(NULL)-processList[i].start >= processList[i].maxTime){
+				kill(processList[i].pid, SIGKILL); // Kill the process
+				processList[i].killedBit = 1; // Set the bit to one
+				printf("[%d] Time exceeded, %ds, terminated, memory usage: %dMB\n", i, processList[i].maxTime, processList[i].memUsage);
+				numberOfNotWorkingProcesses++;
+			}
+			else{
+				processList[i].memUsage = programMemory(processList[i].pid);
+				tempPeakUsage = tempPeakUsage + processList[i].memUsage;
+				printf("[%d] Running, memory usage: %dMB\n",
+					i, programMemory(processList[i].pid));				
+			}		
+		}
+		else if (return_val == processList[i].pid){ // Zombie state
+			// Don't print the exit message when the process is killed
+			if (processList[i].killedBit == 1) 
+				continue; // Go to the next process
+			printf("[%d] Exited, memory usage: %dMB\n", i, processList[i].memUsage);
+			numberOfNotWorkingProcesses++; 
+		}
 		else
 			numberOfNotWorkingProcesses++;
 	}
-	// When all the processes in the struct array are not working
-	// anymore, terminate the program.
+
 	if (numberOfNotWorkingProcesses == *totalProcesses) {
 		printf("All processes have stopped running!\n");
 		exit(0);
 	}
+	if (tempPeakUsage > peakUsage)
+		peakUsage = tempPeakUsage; // peakUsage stores the highest value
+
 	alarm(INTERVAL); // Sets the interval again to 'INTERVAL' seconds
 }
 
@@ -265,11 +373,44 @@ int main(int argc, char *argv[])
 
 	// Handler specified for situation when Ctrl+C is hit
 	signal(SIGINT, handleTermination);
+	int logging = 0, c; // Write to the file by default
+	char *fileName;
+
+	while((c=getopt(argc,argv,":fo:"))!=-1){
+	/*
+	colon after each because each should be followed by another argument
+	colon before first option to differentiate between missing argument and wrong option
+	*/
+
+	switch(c)
+		{
+		case 'f':
+			logging = 1; // Write to stdout
+			break;
+		case 'o':
+			fileName = malloc(strlen(optarg)+1);
+			strncpy(fileName, optarg, strlen(optarg));
+			fileName[strlen(optarg)]='\0';
+			// printf("%s-\n", fileName);
+			break;
+		case':'://missing argument
+		  printf("\nError: %s: option '-%c' requires an argument\n\n",argv[0],optopt);
+		  exit(1);
+
+		case'?'://invalid argument
+		  printf("\nError: %s: option '-%c' is invalid: ignored\n\n",argv[0],optopt);
+		  exit(1);
+		}
+	}
+	if (logging == 0){ // Write to the file
+		fclose(stdout);
+		freopen ("macD.log", "w+", stdout);
+	}
 
 	int sz; // Stores the length of the file opened
 
 	// Reading in the configuration file
-	FILE *fp = fopen("/tmp/cmpt360/macD.conf", "r");
+	FILE *fp = fopen("long.conf", "r");
 
 	if (fp == NULL) { // If there is an error in opening the file.
 		printf("Error: File not found or unable to open the file.\n");
@@ -299,21 +440,36 @@ int main(int argc, char *argv[])
 
 	errorCheck2(nextline);  // Error check
 
-	int i = 0, status = 0;
-	int countCommands = 0, countArguments = 0;
+	int i = 0, countCommands = 0, countArguments = 0;
 
 	totalProcesses = &countCommands; // Initializing global variable
 
 	char **args; // pointer to array of words (OR Array or character arrays)
 
+	char *shared_memory;
+	int *timer = malloc(sizeof(int)); 
+	const int size = 1; // Rounds up to one page size
+
+	int segment_id = shmget(IPC_PRIVATE, size, S_IRUSR | S_IWUSR);
+	shared_memory = (char *) shmat(segment_id, NULL, 0);
+
 	// Going through each line in the 'commands'
 	// Each line contains a single command to be executed
 	while (ptr != NULL) {
+		fflush(stdout);
+		*timer = -1; // Denotes that the process didn't have a max time
 		// Populating args with each argument in a single command
-		args = words(ptr, nextline, &countArguments);
+		args = words(ptr, nextline, &countArguments, &timer);
+		// printf("COUNT countCommands: %d\n", countCommands);
+		// printf("TIMEERR:: %d\n", *timer);
+		// printf("*%s\n" , shared_memory);
 
 		// Creates a child process for the given args
-		executeProcess(args, countCommands);
+		executeProcess(args, countCommands, shared_memory, fileName);
+		processList[countCommands].start = time(NULL);
+		processList[countCommands].maxTime = *timer;
+		processList[countCommands].memUsage = 0;
+		processList[countCommands].killedBit = 0;
 
 		// Prints the current command
 		printf("[%d]", countCommands);
@@ -322,12 +478,15 @@ int main(int argc, char *argv[])
 
 		sleep(1); // Sleeps for a second
 
-		if (waitpid(processList[countCommands].pid,
-							&status, WNOHANG) == 0)
+		if (strcmp(shared_memory, "Successful") == 0) {
+			// processList[countCommands].memUsage = programMemory(processList[countCommands].pid);
 			printf(", started successfully (pid: %d)\n",
 						processList[countCommands].pid);
-		else
+		}
+		else if (strcmp(shared_memory, "Failed") == 0)
 			printf(", failed to start\n");
+		else 
+			printf("%s\n", shared_memory);
 
 	    // Freeing the memory allocated by the commands
 		freeArgs(args, countArguments);
@@ -344,7 +503,7 @@ int main(int argc, char *argv[])
 	// Freeing the allocated memory
 	free(nextline);
 	free(commands);
-
+	free(timer);
 	// Handler function runs every 'INTERVAL' seconds
 	signal(SIGALRM, fiveSecondCheck);
 	alarm(INTERVAL);
