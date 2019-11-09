@@ -35,7 +35,7 @@ make all
 
 ## Building
 ### Usage
-* There are two know flags which can be passed when running the program
+There are two know flags which can be passed when running the program
 * -f is specified if the output is to be displayed to stdout. If not specified, the output of the parent process is redirected to a log file named "macD.log". 
 * -o is specified if the output of the child processes ran using .conf file is to be redirected to a file passed as an argument. If the flag is not specified, then the output goes to /dev/null. 
 ```
