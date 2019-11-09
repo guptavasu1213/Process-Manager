@@ -5,6 +5,8 @@
 * [Prerequisites](#prerequisites)
 * [Getting Started](#getting-started)
 * [Building](#building)
+* [Operation](#operation)
+* [Side Note](#side-note)
 * [Status](#status)
 * [Authors](#authors)
 
@@ -35,7 +37,7 @@ make all
 
 ## Building
 ### Usage
-There are two know flags which can be passed when running the program
+* There are two know flags which can be passed when running the program
 * -f is specified if the output is to be displayed to stdout. If not specified, the output of the parent process is redirected to a log file named "macD.log". 
 * -o is specified if the output of the child processes ran using .conf file is to be redirected to a file passed as an argument. If the flag is not specified, then the output goes to /dev/null. 
 ```
@@ -55,6 +57,13 @@ There are two know flags which can be passed when running the program
 ```
 ./macD -f -o output.txt
 ``` 
+
+## Operation
+* The processes are checked after every 5 seconds and a report is displayed which displays the currently running processes.
+* When the process terminates itself, the report shows that the program "Exited"
+* When the process exceeds the maximum time specified to run, the report shows that the "time [has] exceeded" with the memory that process was using.
+* The *Normal Report* stops printing if all the processes terminate.
+* When the user passes an interrupt by typing *CTRL+C* on the shell, all the running processes are terminated and a final report is displayed.
 
 ## Status
 The project is finished.
